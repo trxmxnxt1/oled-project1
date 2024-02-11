@@ -1,13 +1,13 @@
-#include <SPI.h> // เรียกใช้ library
+#include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_SH1106.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <WiFi.h>
+#include <ESP32_Servo.h>
 
-Adafruit_SSD1306 oled(128, 64, &Wire, -1); // ขนาดของหน้าจอ
-//Adafruit_SH1106 oled(21,22); //21=SDA ,22=SCK
+Adafruit_SH1106 oled(21, 22); // Specify the correct pins for SDA and SCK
 
 char ssid[] = "thiramanat_2.4G";
 char pass[] = "newin11111";
@@ -16,69 +16,123 @@ char pass[] = "newin11111";
 #define UTC_OFFSET     7
 #define UTC_OFFSET_DST 0
 
-#define buzzer 5 // Buzzer
-
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, NTP_SERVER, UTC_OFFSET);
 
-void printLocalTime() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    oled.setCursor(0, 1);
-    oled.println("Connection Err");
-    return;
-  }
+#define buzzer 5 // Buzzer
+int sensorPin = 32; // TCRT5000
+int threshold = 500; // กำหนดค่าสะสมต่ำสุดที่ถือว่าตรวจจับได้
 
-  oled.setCursor(8, 0);
-  oled.println(&timeinfo, "%H:%M:%S");
+int sw1 = 33;
+int sw2 = 25;
+int sw3 = 26;
+int sw4 = 27;
+int LED = 18;
 
-  oled.setCursor(0, 1);
-  oled.println(&timeinfo, "%d/%m/%Y   %Z");
-}
+Servo myservo;
+int servoPin = 13;
 
-void oledCustomMessage(const char* message) {
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.println(message);
-  oled.display();
-}
+bool ledState = LOW; // เพิ่มตัวแปรเพื่อเก็บสถานะ LED
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200); // Open Serial Monitor
 
+  // SW,Servo,LED
+  pinMode(sw1, INPUT);
+  pinMode(sw2, INPUT);
+  pinMode(sw3, INPUT);
+  pinMode(sw4, INPUT);
+  pinMode(LED, OUTPUT);
+  pinMode(13, OUTPUT);
+  myservo.attach(13, 544, 2400); // Servo
+  digitalWrite(13, LOW);
+  // SW,Servo,LED
+
+  // Start Buzzer
   pinMode(buzzer, OUTPUT);
   digitalWrite(buzzer, LOW);
+  // END Buzzer
 
-  oled.begin(SSD1306_SWITCHCAPVCC, 0x3C); // เรียกใช้บอร์ด
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.print("Connecting to ");
-  oled.setCursor(0, 1);
-  oled.print("WiFi ");
+  // Start OLED
+  oled.begin(SH1106_SWITCHCAPVCC, 0x3C);
+  oled.clearDisplay(); // Clear the display
+  connectWiFi();
+  timeClient.begin();
+  timeClient.setTimeOffset(UTC_OFFSET * 3600);
+  // END OLED
+}
 
+void connectWiFi() {
+  Serial.println("Connecting to WiFi...");
   WiFi.begin(ssid, pass);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
-    Serial.println("Connecting to WiFi..");
+    Serial.println("Connecting to WiFi...");
   }
-  Serial.println(WiFi.localIP());
-
-  oled.clearDisplay();
-  oled.setCursor(0, 0);
-  oled.print("Online");
-  oled.setCursor(0, 1);
-  oled.println("Updating time...");
-
-  configTime(UTC_OFFSET * 3600, UTC_OFFSET_DST, NTP_SERVER);
+  Serial.println("Connected to WiFi");
 }
 
+void printTime() {
+  timeClient.update();
+  oled.setTextColor(WHITE, BLACK); // Set text color to white on a black background
+  oled.setCursor(0, 0); // Set cursor position
+  oled.setTextSize(1); // Set text size
+  oled.print("Time : ");
+  oled.println(timeClient.getFormattedTime());
+}
+
+void printDetectionStatus(bool detected) {
+  
+  oled.setTextColor(WHITE, BLACK); // Set text color to white on a black background
+  oled.setCursor(0, 15); // Set cursor position
+  oled.setTextSize(1); // Set text size
+  oled.print("Fish feed : ");
+
+  oled.setCursor(0, 30); // Set cursor position for detection status
+  oled.setTextSize(1); // Set text size for detection status
+  if (detected) {
+    oled.setTextColor(WHITE, BLACK);
+    oled.println("Detected");
+  } else {
+    oled.setTextColor(WHITE, BLACK);
+    oled.println("Not Detected");
+  }
+  oled.display(); // Display the content
+  delay(100);
+  oled.clearDisplay();
+}
+
+void checkSwitches() {
+  if (digitalRead(sw1) == LOW) {
+    Serial.println("SW1 pressed");
+  }
+  if (digitalRead(sw2) == LOW) {
+    Serial.println("SW2 pressed");
+    myservo.write(180);
+  }
+  if (digitalRead(sw3) == LOW) {
+    Serial.println("SW3 pressed");
+    myservo.write(0);
+  }
+  if (digitalRead(sw4) == LOW) {
+    Serial.println("SW4 pressed");
+  }
+}
 
 void loop() {
-  printLocalTime();
-  delay(1000);
+  printTime();
+  checkSwitches();
 
-  // Example: oled a custom message after 10 seconds
-  if (millis() > 10000) {
-    oledCustomMessage("Hello, OLED!");
+  // Start TCRT5000
+  int sensorValue = analogRead(sensorPin);
+  Serial.println(sensorValue);
+  if (sensorValue > threshold) {
+    Serial.println("Not Detected");
+    printDetectionStatus(false);
+  } else {
+    Serial.println("Detected");
+    printDetectionStatus(true);
   }
+  // END TCRT5000
+  delay(1000); // Adjust the delay as needed
 }
